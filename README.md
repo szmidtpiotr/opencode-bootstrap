@@ -58,7 +58,17 @@ systemctl --user status opencode-web --no-pager
 opencode models ollama-cloud-free
 ```
 
-## 5) Daily workflow
+## 5) Refresh model discovery after adding new models
+
+If you add or deploy new models after installation, run discovery again:
+
+```bash
+bash ~/.config/opencode/discover-models.sh
+```
+
+This rebuilds `~/.config/opencode/opencode.json` and restarts `opencode-web`.
+
+## 6) Daily workflow
 
 - Start shared terminal UI in a project dir:
   ```bash
