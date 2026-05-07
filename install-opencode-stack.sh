@@ -201,16 +201,32 @@ except Exception:
     print('[]')
 " 2>/dev/null || echo "[]")"
 
-python3 - <<PY
+# Encode JSON payloads to avoid shell interpolation edge cases.
+AZURE_MODELS_JSON_B64="$(printf '%s' "${AZURE_MODELS_JSON}" | base64 -w0)"
+OLLAMA_LOCAL_JSON_B64="$(printf '%s' "${OLLAMA_LOCAL_JSON}" | base64 -w0)"
+OLLAMA_CLOUD_JSON_B64="$(printf '%s' "${OLLAMA_CLOUD_JSON}" | base64 -w0)"
+export AZURE_MODELS_JSON_B64 OLLAMA_LOCAL_JSON_B64 OLLAMA_CLOUD_JSON_B64 CONFIG_FILE
+
+python3 - <<'PY'
+import base64
 import json
-azure_models = json.loads('''${AZURE_MODELS_JSON}''')
-ollama_local = json.loads('''${OLLAMA_LOCAL_JSON}''')
-ollama_cloud = json.loads('''${OLLAMA_CLOUD_JSON}''')
+import os
+
+def decode_json(env_name):
+    raw = base64.b64decode(os.environ[env_name]).decode("utf-8")
+    return json.loads(raw)
+
+azure_models = decode_json("AZURE_MODELS_JSON_B64")
+ollama_local = decode_json("OLLAMA_LOCAL_JSON_B64")
+ollama_cloud = decode_json("OLLAMA_CLOUD_JSON_B64")
 
 def to_map(items):
     out = {}
     for i in items:
-        out[i['id']] = {'name': i['name']}
+        model_id = i.get('id')
+        model_name = i.get('name')
+        if model_id and model_name:
+            out[model_id] = {'name': model_name}
     return out
 
 config = {
@@ -254,9 +270,9 @@ config = {
     }
 }
 
-with open("${CONFIG_FILE}", "w", encoding="utf-8") as f:
+with open(os.environ["CONFIG_FILE"], "w", encoding="utf-8") as f:
     json.dump(config, f, indent=2)
-print(f"Saved ${CONFIG_FILE}")
+print(f"Saved {os.environ['CONFIG_FILE']}")
 print(f"Azure models: {len(azure_models)} | Ollama local: {len(ollama_local)} | Ollama cloud free: {len(ollama_cloud)}")
 PY
 EOF
@@ -277,7 +293,6 @@ Restart=always
 RestartSec=5
 Environment=HOME=${HOME}
 Environment=PATH=${HOME}/.opencode/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-Environment=AZURE_RESOURCE_NAME=${AZURE_RESOURCE_NAME}
 Environment=KOSZYCKAKAPRYS_AZURE_API_KEY=${KOSZYCKAKAPRYS_AZURE_API_KEY}
 Environment=OLLAMA_CLOUD_TOKEN=${OLLAMA_CLOUD_TOKEN}
 Environment=OPENCODE_SERVER_USERNAME=${OPENCODE_USERNAME}
