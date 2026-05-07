@@ -14,9 +14,11 @@ Bootstrap script to set up OpenCode on a fresh Linux machine with:
 - Network access to Azure + Ollama endpoints
 - Logged in shell user (the script writes to that user's home)
 
-## 2) Environment variables
+## 2) Inputs and environment variables
 
-Set these before running:
+Installer is interactive now. If a value is missing, it asks during setup.
+
+You can still prefill values via env vars to avoid prompts:
 
 ```bash
 export KOSZYCKAKAPRYS_AZURE_API_KEY="YOUR_AZURE_KEY"
@@ -24,7 +26,7 @@ export OLLAMA_CLOUD_TOKEN="YOUR_OLLAMA_TOKEN"
 export OPENCODE_PASSWORD="YOUR_WEB_PASSWORD"
 ```
 
-Optional:
+Optional prefill:
 
 ```bash
 export OPENCODE_USERNAME="piotrszmidt"

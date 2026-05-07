@@ -13,20 +13,56 @@ KOSZYCKAKAPRYS_AZURE_API_KEY="${KOSZYCKAKAPRYS_AZURE_API_KEY:-}"
 OLLAMA_CLOUD_TOKEN="${OLLAMA_CLOUD_TOKEN:-}"
 OLLAMA_LOCAL_URL="${OLLAMA_LOCAL_URL:-https://api-ollama.studio-colorbox.com}"
 
-if [[ -z "$KOSZYCKAKAPRYS_AZURE_API_KEY" ]]; then
-  echo "Missing KOSZYCKAKAPRYS_AZURE_API_KEY env var." >&2
-  exit 1
-fi
+prompt_if_empty() {
+  local var_name="$1"
+  local prompt_text="$2"
+  local secret="${3:-false}"
+  local current="${!var_name}"
+  local value=""
 
-if [[ -z "$OLLAMA_CLOUD_TOKEN" ]]; then
-  echo "Missing OLLAMA_CLOUD_TOKEN env var." >&2
-  exit 1
-fi
+  if [[ -n "${current}" ]]; then
+    return
+  fi
 
-if [[ -z "$OPENCODE_PASSWORD" ]]; then
-  echo "Missing OPENCODE_PASSWORD env var." >&2
-  exit 1
-fi
+  while true; do
+    if [[ "${secret}" == "true" ]]; then
+      read -r -s -p "${prompt_text}: " value
+      echo
+    else
+      read -r -p "${prompt_text}: " value
+    fi
+    if [[ -n "${value}" ]]; then
+      printf -v "${var_name}" "%s" "${value}"
+      return
+    fi
+    echo "Value cannot be empty."
+  done
+}
+
+prompt_with_default() {
+  local var_name="$1"
+  local prompt_text="$2"
+  local current="${!var_name}"
+  local input=""
+  read -r -p "${prompt_text} [${current}]: " input
+  if [[ -n "${input}" ]]; then
+    printf -v "${var_name}" "%s" "${input}"
+  fi
+}
+
+prompt_config() {
+  echo "== OpenCode installer configuration =="
+  prompt_with_default PROJECT_DIR "Project directory for web service"
+  prompt_with_default OPENCODE_PORT "OpenCode port"
+  prompt_with_default OPENCODE_HOSTNAME "OpenCode hostname"
+  prompt_with_default OPENCODE_MDNS_DOMAIN "mDNS domain"
+  prompt_with_default OPENCODE_USERNAME "Web username"
+  prompt_with_default AZURE_RESOURCE_NAME "Azure resource name"
+  prompt_with_default OLLAMA_LOCAL_URL "Ollama local base URL"
+  prompt_if_empty KOSZYCKAKAPRYS_AZURE_API_KEY "Azure API key (KOSZYCKAKAPRYS_AZURE_API_KEY)" true
+  prompt_if_empty OLLAMA_CLOUD_TOKEN "Ollama Cloud token (OLLAMA_CLOUD_TOKEN)" true
+  prompt_if_empty OPENCODE_PASSWORD "OpenCode web password (OPENCODE_PASSWORD)" true
+}
 
 install_opencode() {
   if command -v opencode >/dev/null 2>&1; then
@@ -317,6 +353,8 @@ ensure_local_bin_in_path() {
 }
 
 main() {
+  prompt_config
+
   install_opencode
   write_discover_script
   write_service_files
