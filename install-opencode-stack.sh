@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PROJECT_DIR_DEFAULT="${HOME}/remout_mount/ai-gm"
+PROJECT_DIR_DEFAULT="${HOME}"
 PROJECT_DIR="${PROJECT_DIR:-$PROJECT_DIR_DEFAULT}"
 OPENCODE_PORT="${OPENCODE_PORT:-4096}"
 OPENCODE_HOSTNAME="${OPENCODE_HOSTNAME:-0.0.0.0}"
@@ -58,10 +58,20 @@ prompt_config() {
   prompt_with_default OPENCODE_MDNS_DOMAIN "mDNS domain"
   prompt_with_default OPENCODE_USERNAME "Web username"
   prompt_with_default AZURE_RESOURCE_NAME "Azure resource name"
-  prompt_with_default OLLAMA_LOCAL_URL "Ollama local base URL"
+  prompt_with_default OLLAMA_LOCAL_URL "Ollama URL (local or LAN, eg. http://192.168.1.61:11434)"
   prompt_if_empty KOSZYCKAKAPRYS_AZURE_API_KEY "Azure API key (KOSZYCKAKAPRYS_AZURE_API_KEY)" true
   prompt_if_empty OLLAMA_CLOUD_TOKEN "Ollama Cloud token (OLLAMA_CLOUD_TOKEN)" true
   prompt_if_empty OPENCODE_PASSWORD "OpenCode web password (OPENCODE_PASSWORD)" true
+}
+
+normalize_ollama_local_url() {
+  local url="$1"
+  url="${url%/}"
+  if [[ "${url}" != http://* && "${url}" != https://* ]]; then
+    url="http://${url}"
+  fi
+  url="${url%/v1}"
+  printf "%s" "${url}"
 }
 
 install_opencode() {
@@ -354,6 +364,7 @@ ensure_local_bin_in_path() {
 
 main() {
   prompt_config
+  OLLAMA_LOCAL_URL="$(normalize_ollama_local_url "${OLLAMA_LOCAL_URL}")"
 
   install_opencode
   write_discover_script

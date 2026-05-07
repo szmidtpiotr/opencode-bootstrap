@@ -30,12 +30,18 @@ Optional prefill:
 
 ```bash
 export OPENCODE_USERNAME="piotrszmidt"
-export PROJECT_DIR="$HOME/remout_mount/ai-gm"
+export PROJECT_DIR="$HOME"
 export OPENCODE_PORT="4096"
 export OPENCODE_HOSTNAME="0.0.0.0"
 export OPENCODE_MDNS_DOMAIN="opencode.local"
 export AZURE_RESOURCE_NAME="koszyckakaprys"
 export OLLAMA_LOCAL_URL="https://api-ollama.studio-colorbox.com"
+```
+
+For Ollama on another machine in LAN, set for example:
+
+```bash
+export OLLAMA_LOCAL_URL="http://192.168.1.61:11434"
 ```
 
 ## 3) Run installer
