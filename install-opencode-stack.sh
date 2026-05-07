@@ -4,7 +4,8 @@ set -euo pipefail
 PROJECT_DIR_DEFAULT="${HOME}"
 PROJECT_DIR="${PROJECT_DIR:-$PROJECT_DIR_DEFAULT}"
 OPENCODE_PORT="${OPENCODE_PORT:-4096}"
-OPENCODE_HOSTNAME="${OPENCODE_HOSTNAME:-0.0.0.0}"
+# Bind address: konserwatywnie puste — domyślna automatycznie w prompt_config().
+OPENCODE_HOSTNAME="${OPENCODE_HOSTNAME:-}"
 OPENCODE_MDNS_DOMAIN="${OPENCODE_MDNS_DOMAIN:-opencode.local}"
 OPENCODE_USERNAME="${OPENCODE_USERNAME:-$(whoami)}"
 OPENCODE_PASSWORD="${OPENCODE_PASSWORD:-}"
@@ -54,7 +55,17 @@ prompt_config() {
   echo "== OpenCode installer configuration =="
   prompt_with_default PROJECT_DIR "Project directory for web service"
   prompt_with_default OPENCODE_PORT "OpenCode port"
-  prompt_with_default OPENCODE_HOSTNAME "OpenCode hostname"
+
+  local autodetected
+  autodetected="$(guess_primary_ipv4 || true)"
+  if [[ -z "${autodetected}" ]]; then
+    autodetected="0.0.0.0"
+  fi
+  if [[ -z "${OPENCODE_HOSTNAME}" ]]; then
+    OPENCODE_HOSTNAME="${autodetected}"
+  fi
+
+  prompt_with_default OPENCODE_HOSTNAME "Bind/IP for web (recommended: LAN IPv4 of this machine, e.g. 192.168.1.x — one origin for browsers; enter 0.0.0.0 to listen everywhere)"
   prompt_with_default OPENCODE_MDNS_DOMAIN "mDNS domain"
   prompt_with_default OPENCODE_USERNAME "Web username"
   prompt_with_default AZURE_RESOURCE_NAME "Azure resource name"
@@ -62,6 +73,12 @@ prompt_config() {
   prompt_if_empty KOSZYCKAKAPRYS_AZURE_API_KEY "Azure API key (KOSZYCKAKAPRYS_AZURE_API_KEY)" true
   prompt_if_empty OLLAMA_CLOUD_TOKEN "Ollama Cloud token (OLLAMA_CLOUD_TOKEN)" true
   prompt_if_empty OPENCODE_PASSWORD "OpenCode web password (OPENCODE_PASSWORD)" true
+}
+
+guess_primary_ipv4() {
+  ip -4 route get 1.1.1.1 2>/dev/null \
+    | awk '{ for (i = 1; i < NF; i++) if ($i == "src") { print $(i + 1); exit } }' \
+    || hostname -I 2>/dev/null | awk '{ print $1; exit }'
 }
 
 normalize_ollama_local_url() {
@@ -72,6 +89,21 @@ normalize_ollama_local_url() {
   fi
   url="${url%/v1}"
   printf "%s" "${url}"
+}
+
+write_install_env() {
+  mkdir -p "${HOME}/.config/opencode"
+  (
+    umask 077
+    {
+      printf 'OPENCODE_WEB_HOSTNAME=%q\n' "${OPENCODE_HOSTNAME}"
+      printf 'OPENCODE_WEB_PORT=%q\n' "${OPENCODE_PORT}"
+      printf 'OPENCODE_MDNS_DOMAIN=%q\n' "${OPENCODE_MDNS_DOMAIN}"
+      printf 'AZURE_RESOURCE_NAME=%q\n' "${AZURE_RESOURCE_NAME}"
+      printf 'OLLAMA_LOCAL_BASE=%q\n' "${OLLAMA_LOCAL_URL}"
+    } > "${HOME}/.config/opencode/install.env"
+  )
+  chmod 600 "${HOME}/.config/opencode/install.env" || true
 }
 
 install_opencode() {
@@ -95,12 +127,30 @@ write_discover_script() {
 #!/usr/bin/env bash
 set -euo pipefail
 
-AZURE_URL="${AZURE_URL:-https://koszyckakaprys.openai.azure.com}"
-AZURE_API_KEY="${KOSZYCKAKAPRYS_AZURE_API_KEY:-}"
-OLLAMA_LOCAL_URL="${OLLAMA_LOCAL_URL:-https://api-ollama.studio-colorbox.com}"
-OLLAMA_CLOUD_TOKEN="${OLLAMA_CLOUD_TOKEN:-}"
 CONFIG_DIR="${HOME}/.config/opencode"
 CONFIG_FILE="${CONFIG_DIR}/opencode.json"
+mkdir -p "${CONFIG_DIR}"
+
+INSTALL_ENV="${CONFIG_DIR}/install.env"
+if [[ -r "${INSTALL_ENV}" ]]; then
+  set -a
+  # shellcheck source=/dev/null
+  source "${INSTALL_ENV}"
+  set +a
+fi
+
+AZURE_URL="${AZURE_URL:-https://koszyckakaprys.openai.azure.com}"
+AZURE_API_KEY="${KOSZYCKAKAPRYS_AZURE_API_KEY:-}"
+OLLAMA_CLOUD_TOKEN="${OLLAMA_CLOUD_TOKEN:-}"
+
+OLLAMA_LOCAL_URL="${OLLAMA_LOCAL_BASE:-https://api-ollama.studio-colorbox.com}"
+
+OPENCODE_WEB_HOSTNAME="${OPENCODE_WEB_HOSTNAME:-0.0.0.0}"
+OPENCODE_WEB_PORT="${OPENCODE_WEB_PORT:-4096}"
+OPENCODE_MDNS_DOMAIN="${OPENCODE_MDNS_DOMAIN:-opencode.local}"
+AZURE_RESOURCE_NAME="${AZURE_RESOURCE_NAME:-koszyckakaprys}"
+
+OLLAMA_OPENAPI_BASE="${OLLAMA_LOCAL_URL%/}/v1"
 
 if [[ -z "${AZURE_API_KEY}" ]]; then
   echo "Missing KOSZYCKAKAPRYS_AZURE_API_KEY for model discovery." >&2
@@ -112,7 +162,6 @@ if [[ -z "${OLLAMA_CLOUD_TOKEN}" ]]; then
   exit 1
 fi
 
-mkdir -p "${CONFIG_DIR}"
 echo "Discovering models..."
 
 AZURE_DEPLOYMENTS="$(curl -sf "${AZURE_URL}/openai/deployments?api-version=2023-03-15-preview" -H "api-key: ${AZURE_API_KEY}" || echo "[]")"
@@ -205,7 +254,9 @@ except Exception:
 AZURE_MODELS_JSON_B64="$(printf '%s' "${AZURE_MODELS_JSON}" | base64 -w0)"
 OLLAMA_LOCAL_JSON_B64="$(printf '%s' "${OLLAMA_LOCAL_JSON}" | base64 -w0)"
 OLLAMA_CLOUD_JSON_B64="$(printf '%s' "${OLLAMA_CLOUD_JSON}" | base64 -w0)"
-export AZURE_MODELS_JSON_B64 OLLAMA_LOCAL_JSON_B64 OLLAMA_CLOUD_JSON_B64 CONFIG_FILE
+export AZURE_RESOURCE_NAME AZURE_MODELS_JSON_B64 OLLAMA_LOCAL_JSON_B64 OLLAMA_CLOUD_JSON_B64 CONFIG_FILE
+export OPENCODE_WEB_HOSTNAME OPENCODE_WEB_PORT OPENCODE_MDNS_DOMAIN
+export OLLAMA_OPENAPI_BASE OLLAMA_CLOUD_TOKEN
 
 python3 - <<'PY'
 import base64
@@ -222,29 +273,31 @@ ollama_cloud = decode_json("OLLAMA_CLOUD_JSON_B64")
 
 def to_map(items):
     out = {}
-    for i in items:
-        model_id = i.get('id')
-        model_name = i.get('name')
+    for item in items:
+        model_id = item.get('id')
+        model_name = item.get('name')
         if model_id and model_name:
             out[model_id] = {'name': model_name}
     return out
+
+res_name = os.environ["AZURE_RESOURCE_NAME"]
 
 config = {
     "$schema": "https://opencode.ai/config.json",
     "model": "azure-koszycka/gpt-5.4",
     "small_model": "azure-koszycka/gpt-4.1",
     "server": {
-        "port": ${OPENCODE_PORT:-4096},
-        "hostname": "${OPENCODE_HOSTNAME:-0.0.0.0}",
+        "port": int(os.environ["OPENCODE_WEB_PORT"]),
+        "hostname": os.environ["OPENCODE_WEB_HOSTNAME"],
         "mdns": True,
-        "mdnsDomain": "${OPENCODE_MDNS_DOMAIN:-opencode.local}"
+        "mdnsDomain": os.environ["OPENCODE_MDNS_DOMAIN"],
     },
     "provider": {
         "azure-koszycka": {
             "npm": "@ai-sdk/azure",
-            "name": "Azure (koszyckakaprys)",
+            "name": "Azure ({})".format(res_name),
             "options": {
-                "resourceName": "${AZURE_RESOURCE_NAME:-koszyckakaprys}",
+                "resourceName": res_name,
                 "apiKey": "{env:KOSZYCKAKAPRYS_AZURE_API_KEY}",
                 "useCompletionUrls": True
             },
@@ -254,7 +307,7 @@ config = {
             "npm": "@ai-sdk/openai-compatible",
             "name": "Ollama (Local)",
             "options": {
-                "baseURL": "${OLLAMA_LOCAL_URL:-https://api-ollama.studio-colorbox.com}/v1"
+                "baseURL": os.environ["OLLAMA_OPENAPI_BASE"],
             },
             "models": to_map(ollama_local)
         },
@@ -263,15 +316,15 @@ config = {
             "name": "Ollama Cloud (Free usable)",
             "options": {
                 "baseURL": "https://ollama.com/v1",
-                "apiKey": "${OLLAMA_CLOUD_TOKEN}"
+                "apiKey": os.environ["OLLAMA_CLOUD_TOKEN"],
             },
             "models": to_map(ollama_cloud)
         }
     }
 }
 
-with open(os.environ["CONFIG_FILE"], "w", encoding="utf-8") as f:
-    json.dump(config, f, indent=2)
+with open(os.environ["CONFIG_FILE"], "w", encoding="utf-8") as fh:
+    json.dump(config, fh, indent=2)
 print(f"Saved {os.environ['CONFIG_FILE']}")
 print(f"Azure models: {len(azure_models)} | Ollama local: {len(ollama_local)} | Ollama cloud free: {len(ollama_cloud)}")
 PY
@@ -312,30 +365,30 @@ EOF
 write_helpers() {
   mkdir -p "${HOME}/.local/bin"
 
-  cat > "${HOME}/.local/bin/oc" <<'EOF'
+  cat > "${HOME}/.local/bin/oc" <<OCO
 #!/usr/bin/env bash
 set -euo pipefail
 
-SERVER_URL="${OPENCODE_ATTACH_URL:-http://127.0.0.1:4096}"
-REMOTE_DIR="${PWD}"
-unit_env="$(systemctl --user show opencode-web --property=Environment --value 2>/dev/null || true)"
-username="${OPENCODE_SERVER_USERNAME:-}"
-password="${OPENCODE_SERVER_PASSWORD:-}"
+SERVER_URL="\${OPENCODE_ATTACH_URL:-$(printf '%s' "${OC_DEFAULT_ATTACH}")}"
+REMOTE_DIR="\${PWD}"
+unit_env="\$(systemctl --user show opencode-web --property=Environment --value 2>/dev/null || true)"
+username="\${OPENCODE_SERVER_USERNAME:-}"
+password="\${OPENCODE_SERVER_PASSWORD:-}"
 
-if [[ -z "${username}" ]]; then
-  username="$(printf '%s\n' "${unit_env}" | sed -n 's/.*OPENCODE_SERVER_USERNAME=\([^ ]*\).*/\1/p')"
+if [[ -z "\${username}" ]]; then
+  username="\$(printf '%s\\n' "\${unit_env}" | sed -n 's/.*OPENCODE_SERVER_USERNAME=\([^ ]*\).*/\1/p')"
 fi
-if [[ -z "${password}" ]]; then
-  password="$(printf '%s\n' "${unit_env}" | sed -n 's/.*OPENCODE_SERVER_PASSWORD=\([^ ]*\).*/\1/p')"
+if [[ -z "\${password}" ]]; then
+  password="\$(printf '%s\\n' "\${unit_env}" | sed -n 's/.*OPENCODE_SERVER_PASSWORD=\([^ ]*\).*/\1/p')"
 fi
 
-args=(attach "${SERVER_URL}" --dir "${REMOTE_DIR}")
-[[ -n "${username}" ]] && args+=(--username "${username}")
-[[ -n "${password}" ]] && args+=(--password "${password}")
-exec "${HOME}/.opencode/bin/opencode" "${args[@]}" "$@"
-EOF
+args=(attach "\${SERVER_URL}" --dir "\${REMOTE_DIR}")
+[[ -n "\${username}" ]] && args+=(--username "\${username}")
+[[ -n "\${password}" ]] && args+=(--password "\${password}")
+exec "\${HOME}/.opencode/bin/opencode" "\${args[@]}" "\$@"
+OCO
 
-  cat > "${HOME}/.local/bin/oc-web-here" <<'EOF'
+  cat > "${HOME}/.local/bin/oc-web-here" <<'OCH_HEAD'
 #!/usr/bin/env bash
 set -euo pipefail
 
@@ -360,13 +413,17 @@ sleep 2
 
 if systemctl --user is-active opencode-web >/dev/null 2>&1; then
   echo "opencode-web now serves: ${target_dir}"
-  echo "Local URL: http://127.0.0.1:4096"
+OCH_HEAD
+
+  echo "  printf '%s\\n' \"Canonical web UI: ${OC_DEFAULT_ATTACH}\"" >>"${HOME}/.local/bin/oc-web-here"
+
+  cat >>"${HOME}/.local/bin/oc-web-here" <<'OCH_TAIL'
 else
   echo "opencode-web failed to start for ${target_dir}" >&2
   systemctl --user status opencode-web --no-pager >&2 || true
   exit 1
 fi
-EOF
+OCH_TAIL
 
   chmod +x "${HOME}/.local/bin/oc" "${HOME}/.local/bin/oc-web-here"
 }
@@ -382,8 +439,17 @@ main() {
   OLLAMA_LOCAL_URL="$(normalize_ollama_local_url "${OLLAMA_LOCAL_URL}")"
 
   install_opencode
+  write_install_env
   write_discover_script
   write_service_files
+
+  if [[ "${OPENCODE_HOSTNAME}" == "0.0.0.0" ]]; then
+    OC_DEFAULT_ATTACH="http://127.0.0.1:${OPENCODE_PORT}"
+  else
+    OC_DEFAULT_ATTACH="http://${OPENCODE_HOSTNAME}:${OPENCODE_PORT}"
+  fi
+  export OC_DEFAULT_ATTACH
+
   write_helpers
   ensure_local_bin_in_path
 
@@ -397,7 +463,8 @@ main() {
 
   echo
   echo "Done."
-  echo "Web: http://127.0.0.1:${OPENCODE_PORT}"
+  echo "Canonical web UI: ${OC_DEFAULT_ATTACH}"
+  echo "CLI default attach targets that URL unless OPENCODE_ATTACH_URL overrides it."
   echo "Use in project dir: oc"
   echo "Switch web project: oc-web-here"
 }
