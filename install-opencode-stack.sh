@@ -7,8 +7,6 @@ OPENCODE_PORT="${OPENCODE_PORT:-4096}"
 # Bind address: konserwatywnie puste — domyślna automatycznie w prompt_config().
 OPENCODE_HOSTNAME="${OPENCODE_HOSTNAME:-}"
 OPENCODE_MDNS_DOMAIN="${OPENCODE_MDNS_DOMAIN:-opencode.local}"
-OPENCODE_USERNAME="${OPENCODE_USERNAME:-$(whoami)}"
-OPENCODE_PASSWORD="${OPENCODE_PASSWORD:-}"
 AZURE_RESOURCE_NAME="${AZURE_RESOURCE_NAME:-koszyckakaprys}"
 KOSZYCKAKAPRYS_AZURE_API_KEY="${KOSZYCKAKAPRYS_AZURE_API_KEY:-}"
 OLLAMA_CLOUD_TOKEN="${OLLAMA_CLOUD_TOKEN:-}"
@@ -67,12 +65,10 @@ prompt_config() {
 
   prompt_with_default OPENCODE_HOSTNAME "Bind/IP for web (recommended: LAN IPv4 of this machine, e.g. 192.168.1.x — one origin for browsers; enter 0.0.0.0 to listen everywhere)"
   prompt_with_default OPENCODE_MDNS_DOMAIN "mDNS domain"
-  prompt_with_default OPENCODE_USERNAME "Web username"
   prompt_with_default AZURE_RESOURCE_NAME "Azure resource name"
   prompt_with_default OLLAMA_LOCAL_URL "Ollama URL (local or LAN, eg. http://192.168.1.61:11434)"
   prompt_if_empty KOSZYCKAKAPRYS_AZURE_API_KEY "Azure API key (KOSZYCKAKAPRYS_AZURE_API_KEY)" true
   prompt_if_empty OLLAMA_CLOUD_TOKEN "Ollama Cloud token (OLLAMA_CLOUD_TOKEN)" true
-  prompt_if_empty OPENCODE_PASSWORD "OpenCode web password (OPENCODE_PASSWORD)" true
 }
 
 guess_primary_ipv4() {
@@ -140,7 +136,6 @@ if [[ -r "${INSTALL_ENV}" ]]; then
 fi
 
 AZURE_URL="${AZURE_URL:-https://koszyckakaprys.openai.azure.com}"
-AZURE_API_KEY="${KOSZYCKAKAPRYS_AZURE_API_KEY:-}"
 OLLAMA_CLOUD_TOKEN="${OLLAMA_CLOUD_TOKEN:-}"
 
 OLLAMA_LOCAL_URL="${OLLAMA_LOCAL_BASE:-https://api-ollama.studio-colorbox.com}"
@@ -152,15 +147,31 @@ AZURE_RESOURCE_NAME="${AZURE_RESOURCE_NAME:-koszyckakaprys}"
 
 OLLAMA_OPENAPI_BASE="${OLLAMA_LOCAL_URL%/}/v1"
 
-if [[ -z "${AZURE_API_KEY}" ]]; then
-  echo "Missing KOSZYCKAKAPRYS_AZURE_API_KEY for model discovery." >&2
-  exit 1
-fi
+prompt_secret_if_empty() {
+  local var_name="$1"
+  local prompt_text="$2"
+  local current="${!var_name}"
+  if [[ -n "${current}" ]]; then
+    return
+  fi
+  if [[ ! -t 0 ]]; then
+    echo "Missing ${var_name} and stdin is not a TTY; set it in the environment or ~/.config/opencode/install.env" >&2
+    exit 1
+  fi
+  local value=""
+  while [[ -z "${value}" ]]; do
+    read -r -s -p "${prompt_text}: " value
+    echo
+    [[ -n "${value}" ]] || echo "Value cannot be empty."
+  done
+  printf -v "${var_name}" "%s" "${value}"
+}
 
-if [[ -z "${OLLAMA_CLOUD_TOKEN}" ]]; then
-  echo "Missing OLLAMA_CLOUD_TOKEN for model discovery." >&2
-  exit 1
-fi
+KOSZYCKAKAPRYS_AZURE_API_KEY="${KOSZYCKAKAPRYS_AZURE_API_KEY:-}"
+prompt_secret_if_empty KOSZYCKAKAPRYS_AZURE_API_KEY "KOSZYCKAKAPRYS_AZURE_API_KEY"
+AZURE_API_KEY="${KOSZYCKAKAPRYS_AZURE_API_KEY}"
+
+prompt_secret_if_empty OLLAMA_CLOUD_TOKEN "OLLAMA_CLOUD_TOKEN"
 
 echo "Discovering models..."
 
@@ -348,8 +359,6 @@ Environment=HOME=${HOME}
 Environment=PATH=${HOME}/.opencode/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 Environment=KOSZYCKAKAPRYS_AZURE_API_KEY=${KOSZYCKAKAPRYS_AZURE_API_KEY}
 Environment=OLLAMA_CLOUD_TOKEN=${OLLAMA_CLOUD_TOKEN}
-Environment=OPENCODE_SERVER_USERNAME=${OPENCODE_USERNAME}
-Environment=OPENCODE_SERVER_PASSWORD=${OPENCODE_PASSWORD}
 Environment=OPENCODE_DISABLE_MODELS_FETCH=true
 
 [Install]
@@ -365,32 +374,60 @@ EOF
 write_helpers() {
   mkdir -p "${HOME}/.local/bin"
 
-  cat > "${HOME}/.local/bin/oc" <<OCO
+  cat > "${HOME}/.local/bin/oc" <<'OCO'
 #!/usr/bin/env bash
 set -euo pipefail
 
-SERVER_URL="\${OPENCODE_ATTACH_URL:-$(printf '%s' "${OC_DEFAULT_ATTACH}")}"
-REMOTE_DIR="\${PWD}"
-unit_env="\$(systemctl --user show opencode-web --property=Environment --value 2>/dev/null || true)"
-username="\${OPENCODE_SERVER_USERNAME:-}"
-password="\${OPENCODE_SERVER_PASSWORD:-}"
+INSTALL_ENV="${HOME}/.config/opencode/install.env"
 
-if [[ -z "\${username}" ]]; then
-  username="\$(printf '%s\\n' "\${unit_env}" | sed -n 's/.*OPENCODE_SERVER_USERNAME=\([^ ]*\).*/\1/p')"
-fi
-if [[ -z "\${password}" ]]; then
-  password="\$(printf '%s\\n' "\${unit_env}" | sed -n 's/.*OPENCODE_SERVER_PASSWORD=\([^ ]*\).*/\1/p')"
-fi
+canonical_opencode_web_url() {
+  local bind="" port="4096"
+  if [[ -r "${INSTALL_ENV}" ]]; then
+    set -a
+    # shellcheck source=/dev/null
+    source "${INSTALL_ENV}"
+    set +a
+  fi
+  bind="${OPENCODE_WEB_HOSTNAME:-}"
+  port="${OPENCODE_WEB_PORT:-4096}"
+  if [[ -z "${bind}" || "${bind}" == "0.0.0.0" ]]; then
+    bind="$(ip -4 route get 1.1.1.1 2>/dev/null \
+      | awk '{ for (i = 1; i < NF; i++) if ($i == "src") { print $(i + 1); exit } }')"
+    [[ -z "${bind}" ]] && bind="$(hostname -I 2>/dev/null | awk '{ print $1; exit }')"
+    [[ -z "${bind}" ]] && bind="127.0.0.1"
+  fi
+  printf 'http://%s:%s' "${bind}" "${port}"
+}
 
-args=(attach "\${SERVER_URL}" --dir "\${REMOTE_DIR}")
-[[ -n "\${username}" ]] && args+=(--username "\${username}")
-[[ -n "\${password}" ]] && args+=(--password "\${password}")
-exec "\${HOME}/.opencode/bin/opencode" "\${args[@]}" "\$@"
+SERVER_URL="${OPENCODE_ATTACH_URL:-$(canonical_opencode_web_url)}"
+REMOTE_DIR="${PWD}"
+exec "${HOME}/.opencode/bin/opencode" attach "${SERVER_URL}" --dir "${REMOTE_DIR}" "$@"
 OCO
 
-  cat > "${HOME}/.local/bin/oc-web-here" <<'OCH_HEAD'
+  cat > "${HOME}/.local/bin/oc-web-here" <<'OCH'
 #!/usr/bin/env bash
 set -euo pipefail
+
+INSTALL_ENV="${HOME}/.config/opencode/install.env"
+
+canonical_opencode_web_url() {
+  local bind="" port="4096"
+  if [[ -r "${INSTALL_ENV}" ]]; then
+    set -a
+    # shellcheck source=/dev/null
+    source "${INSTALL_ENV}"
+    set +a
+  fi
+  bind="${OPENCODE_WEB_HOSTNAME:-}"
+  port="${OPENCODE_WEB_PORT:-4096}"
+  if [[ -z "${bind}" || "${bind}" == "0.0.0.0" ]]; then
+    bind="$(ip -4 route get 1.1.1.1 2>/dev/null \
+      | awk '{ for (i = 1; i < NF; i++) if ($i == "src") { print $(i + 1); exit } }')"
+    [[ -z "${bind}" ]] && bind="$(hostname -I 2>/dev/null | awk '{ print $1; exit }')"
+    [[ -z "${bind}" ]] && bind="127.0.0.1"
+  fi
+  printf 'http://%s:%s' "${bind}" "${port}"
+}
 
 if git_root="$(git rev-parse --show-toplevel 2>/dev/null)"; then
   target_dir="${git_root}"
@@ -413,17 +450,13 @@ sleep 2
 
 if systemctl --user is-active opencode-web >/dev/null 2>&1; then
   echo "opencode-web now serves: ${target_dir}"
-OCH_HEAD
-
-  echo "  printf '%s\\n' \"Canonical web UI: ${OC_DEFAULT_ATTACH}\"" >>"${HOME}/.local/bin/oc-web-here"
-
-  cat >>"${HOME}/.local/bin/oc-web-here" <<'OCH_TAIL'
+  printf '%s\n' "Canonical web UI: $(canonical_opencode_web_url)"
 else
   echo "opencode-web failed to start for ${target_dir}" >&2
   systemctl --user status opencode-web --no-pager >&2 || true
   exit 1
 fi
-OCH_TAIL
+OCH
 
   chmod +x "${HOME}/.local/bin/oc" "${HOME}/.local/bin/oc-web-here"
 }
@@ -444,11 +477,12 @@ main() {
   write_service_files
 
   if [[ "${OPENCODE_HOSTNAME}" == "0.0.0.0" ]]; then
-    OC_DEFAULT_ATTACH="http://127.0.0.1:${OPENCODE_PORT}"
+    CANON_HOST="$(guess_primary_ipv4 || true)"
+    [[ -z "${CANON_HOST}" ]] && CANON_HOST="127.0.0.1"
   else
-    OC_DEFAULT_ATTACH="http://${OPENCODE_HOSTNAME}:${OPENCODE_PORT}"
+    CANON_HOST="${OPENCODE_HOSTNAME}"
   fi
-  export OC_DEFAULT_ATTACH
+  OC_DEFAULT_ATTACH="http://${CANON_HOST}:${OPENCODE_PORT}"
 
   write_helpers
   ensure_local_bin_in_path

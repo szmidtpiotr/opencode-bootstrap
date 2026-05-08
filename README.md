@@ -23,13 +23,11 @@ You can still prefill values via env vars to avoid prompts:
 ```bash
 export KOSZYCKAKAPRYS_AZURE_API_KEY="YOUR_AZURE_KEY"
 export OLLAMA_CLOUD_TOKEN="YOUR_OLLAMA_TOKEN"
-export OPENCODE_PASSWORD="YOUR_WEB_PASSWORD"
 ```
 
 Optional prefill:
 
 ```bash
-export OPENCODE_USERNAME="piotrszmidt"
 export PROJECT_DIR="$HOME"
 export OPENCODE_PORT="4096"
 export OPENCODE_HOSTNAME="0.0.0.0"
@@ -48,10 +46,12 @@ export OLLAMA_LOCAL_URL="http://192.168.1.61:11434"
 
 The installer prompts for **Bind/IP for web** (with an autodetected LAN IPv4 as the default suggestion). Typical choice is this machine’s address on your LAN (e.g. `192.168.1.170`), so browsers and helpers use a single predictable origin.
 
-- **`0.0.0.0`** — listen on all interfaces. `opencode.json` and systemd use that hostname; **`oc` default attach URL** remains **`http://127.0.0.1:<port>`** unless you override with **`OPENCODE_ATTACH_URL`**.
-- **specific IP** — the same IP is baked into **`oc`**’s default attach URL and echoed at the end of install / `oc-web-here`.
+- **`0.0.0.0`** — listen on all interfaces. **`oc`**, **`oc-web-here`**, and the installer summary still print a **canonical URL using your current LAN IPv4** (read from `install.env` plus route lookup), so it matches what other machines use on the LAN.
+- **Specific IP in `install.env`** — that exact host is used in the printed URL (no extra lookup).
 
-Persistent settings written by the installer appear in **`~/.config/opencode/install.env`** (permissions `600`): `OPENCODE_WEB_HOSTNAME`, `OPENCODE_WEB_PORT`, `OPENCODE_MDNS_DOMAIN`, `AZURE_RESOURCE_NAME`, `OLLAMA_LOCAL_BASE`. **`~/.config/opencode/discover-models.sh`** sources that file before regenerating `opencode.json`.
+Web UI HTTP basic auth is **not** configured by this bootstrap (no `OPENCODE_SERVER_*` in systemd).
+
+Persistent settings written by the installer appear in **`~/.config/opencode/install.env`** (permissions `600`): `OPENCODE_WEB_HOSTNAME`, `OPENCODE_WEB_PORT`, `OPENCODE_MDNS_DOMAIN`, `AZURE_RESOURCE_NAME`, `OLLAMA_LOCAL_BASE`. **`~/.config/opencode/discover-models.sh`** sources that file before regenerating `opencode.json`. If **`KOSZYCKAKAPRYS_AZURE_API_KEY`** or **`OLLAMA_CLOUD_TOKEN`** are missing and you run discovery **interactively**, the script **prompts** for them; from cron/non-TTY it exits with a clear error unless the variables are set.
 
 ## 3) Run installer
 
@@ -94,6 +94,6 @@ systemctl --user restart opencode-web
 
 Web URL:
 
-- Use the **canonical URL** printed at the end of the installer (or by `oc-web-here` after a successful restart). It is `http://<bind-host>:<port>` when you bind a specific IP, or `http://127.0.0.1:<port>` when you chose `0.0.0.0` (default attach for `oc` matches that).
-- Override the CLI target any time: `export OPENCODE_ATTACH_URL="http://…"`.
+- Use the **canonical URL** printed at the end of the installer or by **`oc-web-here`** (same logic as **`oc`** default attach). Port comes from **`OPENCODE_WEB_PORT`** in `install.env`.
+- Override the CLI attach target: `export OPENCODE_ATTACH_URL="http://…"`.
 
