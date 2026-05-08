@@ -49,9 +49,11 @@ The installer prompts for **Bind/IP for web** (with an autodetected LAN IPv4 as 
 - **`0.0.0.0`** — listen on all interfaces. **`oc`**, **`oc-web-here`**, and the installer summary still print a **canonical URL using your current LAN IPv4** (read from `install.env` plus route lookup), so it matches what other machines use on the LAN.
 - **Specific IP in `install.env`** — that exact host is used in the printed URL (no extra lookup).
 
-Web UI HTTP basic auth is **not** configured by this bootstrap (no `OPENCODE_SERVER_*` in systemd).
+Web UI HTTP basic auth is **not** configured by this bootstrap. Do **not** put **`OPENCODE_SERVER_USERNAME`** / **`OPENCODE_SERVER_PASSWORD`** in `~/.profile` or `~/.bashrc`: on many desktops **`systemctl --user`** imports that login environment, so OpenCode would still see them even if they are absent from the unit file. The installer adds **`UnsetEnvironment=…`** in **`opencode-web.service.d/override.conf`** so those vars are dropped for the service.
 
-Persistent settings written by the installer appear in **`~/.config/opencode/install.env`** (permissions `600`): `OPENCODE_WEB_HOSTNAME`, `OPENCODE_WEB_PORT`, `OPENCODE_MDNS_DOMAIN`, `AZURE_RESOURCE_NAME`, `OLLAMA_LOCAL_BASE`. **`~/.config/opencode/discover-models.sh`** sources that file before regenerating `opencode.json`. If **`KOSZYCKAKAPRYS_AZURE_API_KEY`** or **`OLLAMA_CLOUD_TOKEN`** are missing and you run discovery **interactively**, the script **prompts** for them; from cron/non-TTY it exits with a clear error unless the variables are set.
+Discovery writes **`OPENCODE_PUBLIC_ORIGIN`** into **`install.env`** (canonical browser URL, e.g. `http://192.168.1.170:4097`) and sets **`server.cors`** in **`opencode.json`** so the SPA can call the API from that origin instead of behaving like a lone `localhost` session.
+
+Persistent settings in **`~/.config/opencode/install.env`** include: `OPENCODE_WEB_HOSTNAME`, `OPENCODE_WEB_PORT`, `OPENCODE_MDNS_DOMAIN`, `AZURE_RESOURCE_NAME`, `OLLAMA_LOCAL_BASE`, `OPENCODE_PUBLIC_ORIGIN`. **`~/.config/opencode/discover-models.sh`** sources that file before regenerating **`opencode.json`**. If **`KOSZYCKAKAPRYS_AZURE_API_KEY`** or **`OLLAMA_CLOUD_TOKEN`** are missing and you run discovery **interactively**, the script **prompts** for them; from cron/non-TTY it exits with a clear error unless the variables are set.
 
 ## 3) Run installer
 

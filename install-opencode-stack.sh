@@ -97,6 +97,7 @@ write_install_env() {
       printf 'OPENCODE_MDNS_DOMAIN=%q\n' "${OPENCODE_MDNS_DOMAIN}"
       printf 'AZURE_RESOURCE_NAME=%q\n' "${AZURE_RESOURCE_NAME}"
       printf 'OLLAMA_LOCAL_BASE=%q\n' "${OLLAMA_LOCAL_URL}"
+      printf 'OPENCODE_PUBLIC_ORIGIN=%q\n' "${OC_DEFAULT_ATTACH}"
     } > "${HOME}/.config/opencode/install.env"
   )
   chmod 600 "${HOME}/.config/opencode/install.env" || true
@@ -266,6 +267,7 @@ AZURE_MODELS_JSON_B64="$(printf '%s' "${AZURE_MODELS_JSON}" | base64 -w0)"
 OLLAMA_LOCAL_JSON_B64="$(printf '%s' "${OLLAMA_LOCAL_JSON}" | base64 -w0)"
 OLLAMA_CLOUD_JSON_B64="$(printf '%s' "${OLLAMA_CLOUD_JSON}" | base64 -w0)"
 export AZURE_RESOURCE_NAME AZURE_MODELS_JSON_B64 OLLAMA_LOCAL_JSON_B64 OLLAMA_CLOUD_JSON_B64 CONFIG_FILE
+export OPENCODE_PUBLIC_ORIGIN="${OPENCODE_PUBLIC_ORIGIN:-}"
 export OPENCODE_WEB_HOSTNAME OPENCODE_WEB_PORT OPENCODE_MDNS_DOMAIN
 export OLLAMA_OPENAPI_BASE OLLAMA_CLOUD_TOKEN
 
@@ -293,6 +295,22 @@ def to_map(items):
 
 res_name = os.environ["AZURE_RESOURCE_NAME"]
 
+def cors_origins():
+    port = int(os.environ["OPENCODE_WEB_PORT"])
+    hn = os.environ.get("OPENCODE_WEB_HOSTNAME", "0.0.0.0")
+    pub = (os.environ.get("OPENCODE_PUBLIC_ORIGIN") or "").strip().rstrip("/")
+    out = [
+        "http://127.0.0.1:{}".format(port),
+        "http://localhost:{}".format(port),
+    ]
+    if pub and pub not in out:
+        out.append(pub)
+    if hn and hn not in ("", "0.0.0.0"):
+        lan = "http://{}:{}".format(hn, port)
+        if lan not in out:
+            out.append(lan)
+    return out
+
 config = {
     "$schema": "https://opencode.ai/config.json",
     "model": "azure-koszycka/gpt-5.4",
@@ -302,6 +320,7 @@ config = {
         "hostname": os.environ["OPENCODE_WEB_HOSTNAME"],
         "mdns": True,
         "mdnsDomain": os.environ["OPENCODE_MDNS_DOMAIN"],
+        "cors": cors_origins(),
     },
     "provider": {
         "azure-koszycka": {
@@ -367,6 +386,7 @@ EOF
 
   cat > "${HOME}/.config/systemd/user/opencode-web.service.d/override.conf" <<EOF
 [Service]
+UnsetEnvironment=OPENCODE_SERVER_USERNAME OPENCODE_SERVER_PASSWORD
 WorkingDirectory=${PROJECT_DIR}
 EOF
 }
@@ -441,6 +461,7 @@ mkdir -p "${override_dir}"
 
 cat > "${override_file}" <<EOT
 [Service]
+UnsetEnvironment=OPENCODE_SERVER_USERNAME OPENCODE_SERVER_PASSWORD
 WorkingDirectory=${target_dir}
 EOT
 
@@ -471,11 +492,6 @@ main() {
   prompt_config
   OLLAMA_LOCAL_URL="$(normalize_ollama_local_url "${OLLAMA_LOCAL_URL}")"
 
-  install_opencode
-  write_install_env
-  write_discover_script
-  write_service_files
-
   if [[ "${OPENCODE_HOSTNAME}" == "0.0.0.0" ]]; then
     CANON_HOST="$(guess_primary_ipv4 || true)"
     [[ -z "${CANON_HOST}" ]] && CANON_HOST="127.0.0.1"
@@ -483,6 +499,11 @@ main() {
     CANON_HOST="${OPENCODE_HOSTNAME}"
   fi
   OC_DEFAULT_ATTACH="http://${CANON_HOST}:${OPENCODE_PORT}"
+
+  install_opencode
+  write_install_env
+  write_discover_script
+  write_service_files
 
   write_helpers
   ensure_local_bin_in_path
