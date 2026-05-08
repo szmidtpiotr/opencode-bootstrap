@@ -253,11 +253,21 @@ try:
         except Exception:
             return False
     result = []
+    catalog = []
     for model in models:
         mid = model.get('id', '')
-        if mid and usable(mid):
+        if not mid:
+            continue
+        catalog.append({'id': mid, 'name': mid})
+        if usable(mid):
             result.append({'id': mid, 'name': mid})
-    print(json.dumps(result))
+    if result:
+        print(json.dumps(result))
+    elif catalog:
+        # Probe excluded everything (rate limits, API churn, or stricter /responses). Expose catalog so UI is not empty.
+        print(json.dumps(catalog[:200]))
+    else:
+        print('[]')
 except Exception:
     print('[]')
 " 2>/dev/null || echo "[]")"
@@ -351,7 +361,7 @@ config = {
             "name": "Ollama Cloud (Free usable)",
             "options": {
                 "baseURL": "https://ollama.com/v1",
-                "apiKey": os.environ["OLLAMA_CLOUD_TOKEN"],
+                "apiKey": "{env:OLLAMA_CLOUD_TOKEN}",
             },
             "models": to_map(ollama_cloud)
         }

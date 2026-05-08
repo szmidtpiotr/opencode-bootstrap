@@ -85,6 +85,8 @@ This rebuilds `~/.config/opencode/opencode.json`. Restart the service if needed:
 systemctl --user restart opencode-web
 ```
 
+**Ollama Cloud list empty in the UI?** Discovery probes each cloud model against `/v1/responses`; if that probe yields no models (rate limits, API changes) but `https://ollama.com/v1/models` still returns a catalog, the script **falls back** to that catalog (capped) so the provider is not empty. Ensure **`OLLAMA_CLOUD_TOKEN`** is set when you run discovery (`Environment` from `opencode-web`, or export in the shell).
+
 ## 6) Daily workflow
 
 - Start shared terminal UI in a project dir:
