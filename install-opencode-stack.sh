@@ -148,7 +148,23 @@ AZURE_RESOURCE_NAME="${AZURE_RESOURCE_NAME:-koszyckakaprys}"
 
 OLLAMA_OPENAPI_BASE="${OLLAMA_LOCAL_URL%/}/v1"
 
-prompt_secret_if_empty() {
+load_from_systemd_env() {
+  local var_name="$1"
+  local current="${!var_name:-}"
+  if [[ -n "${current}" ]]; then
+    return
+  fi
+  local extracted=""
+  extracted="$(systemctl --user show opencode-web -p Environment --value 2>/dev/null \
+    | tr ' ' '\n' \
+    | sed -n "s/^${var_name}=//p" \
+    | head -n 1)"
+  if [[ -n "${extracted}" ]]; then
+    printf -v "${var_name}" "%s" "${extracted}"
+  fi
+}
+
+prompt_if_empty() {
   local var_name="$1"
   local prompt_text="$2"
   local current="${!var_name}"
@@ -156,23 +172,24 @@ prompt_secret_if_empty() {
     return
   fi
   if [[ ! -t 0 ]]; then
-    echo "Missing ${var_name} and stdin is not a TTY; set it in the environment or ~/.config/opencode/install.env" >&2
+    echo "Missing ${var_name} and stdin is not a TTY; set it in environment, install.env, or opencode-web service env" >&2
     exit 1
   fi
   local value=""
   while [[ -z "${value}" ]]; do
-    read -r -s -p "${prompt_text}: " value
-    echo
+    read -r -p "${prompt_text}: " value
     [[ -n "${value}" ]] || echo "Value cannot be empty."
   done
   printf -v "${var_name}" "%s" "${value}"
 }
 
 KOSZYCKAKAPRYS_AZURE_API_KEY="${KOSZYCKAKAPRYS_AZURE_API_KEY:-}"
-prompt_secret_if_empty KOSZYCKAKAPRYS_AZURE_API_KEY "KOSZYCKAKAPRYS_AZURE_API_KEY"
+load_from_systemd_env KOSZYCKAKAPRYS_AZURE_API_KEY
+prompt_if_empty KOSZYCKAKAPRYS_AZURE_API_KEY "KOSZYCKAKAPRYS_AZURE_API_KEY"
 AZURE_API_KEY="${KOSZYCKAKAPRYS_AZURE_API_KEY}"
 
-prompt_secret_if_empty OLLAMA_CLOUD_TOKEN "OLLAMA_CLOUD_TOKEN"
+load_from_systemd_env OLLAMA_CLOUD_TOKEN
+prompt_if_empty OLLAMA_CLOUD_TOKEN "OLLAMA_CLOUD_TOKEN"
 
 echo "Discovering models..."
 
