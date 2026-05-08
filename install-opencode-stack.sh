@@ -315,6 +315,11 @@ config = {
     "$schema": "https://opencode.ai/config.json",
     "model": "azure-koszycka/gpt-5.4",
     "small_model": "azure-koszycka/gpt-4.1",
+    "enabled_providers": [
+        "azure-koszycka",
+        "ollama-local",
+        "ollama-cloud-free",
+    ],
     "server": {
         "port": int(os.environ["OPENCODE_WEB_PORT"]),
         "hostname": os.environ["OPENCODE_WEB_HOSTNAME"],
@@ -386,7 +391,7 @@ EOF
 
   cat > "${HOME}/.config/systemd/user/opencode-web.service.d/override.conf" <<EOF
 [Service]
-UnsetEnvironment=OPENCODE_SERVER_USERNAME OPENCODE_SERVER_PASSWORD
+UnsetEnvironment=OPENCODE_SERVER_USERNAME OPENCODE_SERVER_PASSWORD AZURE_RESOURCE_NAME
 WorkingDirectory=${PROJECT_DIR}
 EOF
 }
@@ -461,7 +466,7 @@ mkdir -p "${override_dir}"
 
 cat > "${override_file}" <<EOT
 [Service]
-UnsetEnvironment=OPENCODE_SERVER_USERNAME OPENCODE_SERVER_PASSWORD
+UnsetEnvironment=OPENCODE_SERVER_USERNAME OPENCODE_SERVER_PASSWORD AZURE_RESOURCE_NAME
 WorkingDirectory=${target_dir}
 EOT
 
